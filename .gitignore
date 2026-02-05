@@ -1,8 +1,10 @@
 .venv
 *.ipynb
+.env
 
 **/__pycache__/
 
+/data/
 config
 logs
 plugins
