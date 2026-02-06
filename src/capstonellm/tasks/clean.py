@@ -1,7 +1,7 @@
 import argparse
 import logging
 from pyspark.sql import SparkSession
-from pyspark.sql.functions import explode
+import pyspark.sql.functions as f
 from capstonellm.common.catalog import llm_bucket
 from capstonellm.common.spark import ClosableSparkSession
 from dotenv import load_dotenv
@@ -14,55 +14,34 @@ aws_secret_key = os.getenv("AWS_SECRET_ACCESS_KEY")
 logger = logging.getLogger(__name__)
 
 def clean(spark: SparkSession, environment: str, tag: str):
-    #print("Start of cleaning job!")
+    questions = spark.read.json(f"s3a://{llm_bucket}/input/{tag}/questions.json")
 
-    # Loading questions.json into dataframe
-    questions_df = spark.read.json("s3a://dataminded-academy-capstone-llm-data-us/input/dbt/questions.json")
+    df = questions.withColumn("question", f.explode("items"))
+    df = df.select("question.*")
+    df = df.select("question_id", "body", "title", "link").withColumnRenamed(
+        "body", "question"
+    )
+    df.show()
 
-    # Explode the 'items' array to create a row for each struct in the array
-    exploded_questions_df = questions_df.select(explode("items").alias("item"))
+    answers = spark.read.json(f"s3a://{llm_bucket}/input/{tag}/answers.json")
 
-    # Select the desired columns from the exploded df
-    filtered_questions_df = exploded_questions_df.select("item.question_id", "item.title", "item.body")
-
-    # Giving specific name to columns to avoid duplicates post join
-    filtered_questions_renamed_df = filtered_questions_df.withColumnsRenamed(
-        {"title": "question_title", "body": "question_body"}
-        )
-
-    filtered_questions_renamed_df.show()
-    #print("End of cleaning job!")
-
-    # Loading answerrs.json into dataframe
-    answers_df = spark.read.json("s3a://dataminded-academy-capstone-llm-data-us/input/dbt/answers.json")
-
-    # Explode the 'items' array to create a row for each struct in the array
-    exploded_answers_df = answers_df.select(explode("items").alias("item"))
-
-    # Select the desired columns from the exploded df
-    filtered_answers_df = exploded_answers_df.select("item.answer_id", "item.body", "item.question_id", "item.is_accepted")
-
-    # Giving specific name to columns to avoid duplicates post join
-    filtered_answers_renamed_df = filtered_answers_df.withColumnsRenamed(
-        {"body": "answer_body", "is_accepted": "answer_is_accepted"}
-        )
-
-    filtered_answers_renamed_df.show()
-
-    # Joining the filtered df togethers on question_id
-    joined_df = filtered_questions_renamed_df.join(
-        filtered_answers_renamed_df,
-        on="question_id",
-        how="outer"
+    dfa = answers.withColumn("answer", f.explode("items"))
+    dfa = dfa.select("answer.*")
+    dfa = dfa.select("question_id", "answer_id", "body").withColumnRenamed(
+        "body", "answer"
     )
 
-    joined_df.show()
+    joined = df.join(dfa, "question_id")
+    joined = joined.withColumn("question_id", f.col("question_id").cast("string"))
+    joined = joined.withColumn("answer_id", f.col("answer_id").cast("string"))
+
+    count = joined.count()
+    joined.repartition(count).write.mode("overwrite").json(
+        f"s3a://{llm_bucket}/cleaned/{tag}/"
+    )
 
     # Writing joined dataframe to file
     # DO NOT RUN joined_df.write.mode("overwrite").json("./")
-    # RUN THIS INSTEAD 
-    joined_df.write.mode("overwrite").json("s3a://dataminded-academy-capstone-llm-data-us/output/dbt/")
-
 
 def main():
     parser = argparse.ArgumentParser(description="capstone_llm")
