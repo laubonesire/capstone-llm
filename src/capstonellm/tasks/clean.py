@@ -37,7 +37,7 @@ def clean(spark: SparkSession, environment: str, tag: str):
 
     count = joined.count()
     joined.repartition(count).write.mode("overwrite").json(
-        f"s3a://{llm_bucket}/cleaned/{tag}/"
+        f"s3a://{llm_bucket}/cleaned/laurent/{tag}/"
     )
 
     # Writing joined dataframe to file

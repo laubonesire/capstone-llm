@@ -5,3 +5,11 @@ ENV PYSPARK_PYTHON python3
 WORKDIR /opt/spark/work-dir
 
 #TODO add your project code and dependencies to the image
+# Install UV
+RUN pip install uv
+
+# Copy dependency files
+COPY . .
+
+# Install dependencies using UV
+RUN uv sync
